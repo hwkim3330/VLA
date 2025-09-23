@@ -1,0 +1,19 @@
+{
+  "name": "p2p-messenger",
+  "version": "1.0.0",
+  "description": "Decentralized P2P Messaging System with E2E Encryption",
+  "main": "node/server.js",
+  "scripts": {
+    "start-node": "node node/server.js",
+    "start-client": "cd client && python3 -m http.server 3000",
+    "dev": "npm run start-node & npm run start-client"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1",
+    "socket.io-client": "^4.6.1",
+    "crypto-js": "^4.2.0",
+    "uuid": "^9.0.1",
+    "cors": "^2.8.5"
+  }
+}

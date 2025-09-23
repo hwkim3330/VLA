@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Messenger - 분산형 메시징</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+</head>
+<body>
+    <div class="background-gradient">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="container">
+        <!-- Login Screen -->
+        <div id="loginScreen" class="screen active glass-panel">
+            <div class="logo-container">
+                <div class="logo">
+                    <svg width="60" height="60" viewBox="0 0 60 60">
+                        <circle cx="30" cy="30" r="25" fill="none" stroke="white" stroke-width="2" opacity="0.8"/>
+                        <circle cx="30" cy="30" r="18" fill="none" stroke="white" stroke-width="2" opacity="0.6"/>
+                        <circle cx="30" cy="30" r="10" fill="white" opacity="0.9"/>
+                    </svg>
+                </div>
+                <h1>P2P Messenger</h1>
+                <p class="tagline">분산형 종단간 암호화 메시징</p>
+            </div>
+
+            <div class="form-group">
+                <input type="text" id="username" placeholder="사용자 이름" class="glass-input">
+                <input type="text" id="nodeUrl" placeholder="노드 URL (기본: http://localhost:8080)" class="glass-input">
+                <button onclick="connect()" class="glass-button primary">연결하기</button>
+            </div>
+
+            <div class="node-info glass-card">
+                <h3>노드 운영하기</h3>
+                <p>노드를 운영하고 메시지 중계로 보상받으세요</p>
+                <code>npm run start-node</code>
+            </div>
+        </div>
+
+        <!-- Chat Screen -->
+        <div id="chatScreen" class="screen glass-panel">
+            <div class="chat-header glass-header">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar"></div>
+                    <div>
+                        <div class="user-name" id="currentUser">사용자</div>
+                        <div class="connection-status">
+                            <span class="status-dot online"></span>
+                            <span id="connectionStatus">연결됨</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button onclick="showNodeStats()" class="icon-button glass-button">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="white">
+                            <rect x="2" y="10" width="3" height="8"/>
+                            <rect x="8" y="6" width="3" height="12"/>
+                            <rect x="14" y="2" width="3" height="16"/>
+                        </svg>
+                    </button>
+                    <button onclick="disconnect()" class="icon-button glass-button">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="white">
+                            <path d="M13 3l4 4-4 4M17 7H9M7 3v14" stroke="white" fill="none" stroke-width="2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="chat-container">
+                <div class="sidebar glass-sidebar">
+                    <div class="sidebar-section">
+                        <h3>채팅</h3>
+                        <button onclick="startNewChat()" class="glass-button secondary full-width">
+                            <span>+ 새 채팅</span>
+                        </button>
+                    </div>
+
+                    <div class="chat-list" id="chatList">
+                        <!-- Chat items will be added here -->
+                    </div>
+
+                    <div class="sidebar-section">
+                        <h3>그룹</h3>
+                        <button onclick="createRoom()" class="glass-button secondary full-width">
+                            <span>+ 그룹 만들기</span>
+                        </button>
+                    </div>
+
+                    <div class="room-list" id="roomList">
+                        <!-- Room items will be added here -->
+                    </div>
+                </div>
+
+                <div class="chat-area">
+                    <div class="chat-select-prompt glass-card">
+                        <svg width="60" height="60" viewBox="0 0 60 60" opacity="0.5">
+                            <path d="M10 20 Q 10 10 20 10 L 40 10 Q 50 10 50 20 L 50 35 Q 50 45 40 45 L 20 45 L 10 50 Z"
+                                  fill="none" stroke="white" stroke-width="2"/>
+                        </svg>
+                        <p>채팅을 선택하거나 새로운 대화를 시작하세요</p>
+                    </div>
+
+                    <div class="active-chat" id="activeChat" style="display:none">
+                        <div class="chat-messages" id="chatMessages">
+                            <!-- Messages will be added here -->
+                        </div>
+
+                        <div class="message-input-container glass-input-container">
+                            <input type="text" id="messageInput" placeholder="메시지 입력..." class="message-input">
+                            <button onclick="sendMessage()" class="send-button glass-button primary">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="white">
+                                    <path d="M2 10 L 18 10 M 12 4 L 18 10 L 12 16" stroke="white" stroke-width="2" fill="none"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Node Stats Modal -->
+        <div id="nodeStatsModal" class="modal">
+            <div class="modal-content glass-panel">
+                <div class="modal-header">
+                    <h2>노드 상태</h2>
+                    <button onclick="closeNodeStats()" class="close-button">&times;</button>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card glass-card">
+                        <div class="stat-label">노드 ID</div>
+                        <div class="stat-value" id="statNodeId">-</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-label">평판</div>
+                        <div class="stat-value" id="statReputation">-</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-label">처리 메시지</div>
+                        <div class="stat-value" id="statMessageCount">-</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-label">보상 (토큰)</div>
+                        <div class="stat-value" id="statRewards">-</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-label">연결된 클라이언트</div>
+                        <div class="stat-value" id="statClients">-</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-label">연결된 피어</div>
+                        <div class="stat-value" id="statPeers">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
