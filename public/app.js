@@ -223,12 +223,17 @@ class ZeroMessenger {
             </div>
 
             <div class="message-input-container">
-                <div class="message-input-wrapper">
+                <input type="file" id="fileInput" style="display:none" onchange="app.handleFileSelect(event)" accept="image/*,video/*,.pdf,.doc,.docx">
+                <button class="emoji-button" onclick="app.toggleEmojiPicker()" title="이모지">😊</button>
+                <button class="emoji-button" onclick="document.getElementById('fileInput').click()" title="파일 첨부">📎</button>
+                <div class="message-input-wrapper" style="flex:1">
                     <textarea class="message-input" id="messageInput"
                         placeholder="메시지를 입력하세요..."
                         rows="1"
-                        onkeypress="app.handleKeyPress(event)"></textarea>
+                        onkeypress="app.handleKeyPress(event)"
+                        oninput="app.handleTyping()"></textarea>
                 </div>
+                <button class="emoji-button" onclick="app.startVoiceMessage()" title="음성 메시지">🎤</button>
                 <button class="send-button" onclick="app.sendMessage()">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                         <path d="M3 12L21 3L12 21L10 14L3 12Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -273,6 +278,117 @@ class ZeroMessenger {
         `;
 
         messagesList.appendChild(messageDiv);
+    }
+
+    // Show typing indicator
+    showTypingIndicator() {
+        if (document.getElementById('typingIndicator')) return;
+
+        const messagesList = document.getElementById('messagesList');
+        const typingDiv = document.createElement('div');
+        typingDiv.id = 'typingIndicator';
+        typingDiv.className = 'message received';
+        typingDiv.innerHTML = `
+            <div class="message-bubble">
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        `;
+        messagesList.appendChild(typingDiv);
+        messagesList.scrollTop = messagesList.scrollHeight;
+    }
+
+    hideTypingIndicator() {
+        const indicator = document.getElementById('typingIndicator');
+        if (indicator) indicator.remove();
+    }
+
+    // Handle file selection
+    async handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Convert to base64 for demo
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const message = {
+                text: `📎 ${file.name}`,
+                file: {
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    data: e.target.result
+                },
+                sent: true,
+                time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+            };
+
+            this.displayFileMessage(message);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    displayFileMessage(msg) {
+        const messagesList = document.getElementById('messagesList');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${msg.sent ? 'sent' : 'received'}`;
+
+        let fileContent = '';
+        if (msg.file.type.startsWith('image/')) {
+            fileContent = `<img src="${msg.file.data}" class="file-preview" alt="${msg.file.name}">`;
+        } else if (msg.file.type.startsWith('video/')) {
+            fileContent = `<video src="${msg.file.data}" class="file-preview" controls></video>`;
+        }
+
+        messageDiv.innerHTML = `
+            <div class="message-bubble">
+                ${fileContent}
+                <div class="message-text">${msg.text}</div>
+                <div class="message-time">${msg.time}</div>
+            </div>
+        `;
+
+        messagesList.appendChild(messageDiv);
+        messagesList.scrollTop = messagesList.scrollHeight;
+    }
+
+    // Toggle emoji picker
+    toggleEmojiPicker() {
+        const emojis = ['😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶'];
+
+        const picker = prompt('이모지를 선택하세요:\n' + emojis.join(' '));
+        if (picker) {
+            const input = document.getElementById('messageInput');
+            input.value += picker;
+            input.focus();
+        }
+    }
+
+    // Start voice message recording
+    startVoiceMessage() {
+        alert('음성 메시지 기능은 준비 중입니다 🎤');
+
+        // In real implementation:
+        // navigator.mediaDevices.getUserMedia({ audio: true })
+        // Record audio and send as blob
+    }
+
+    // Handle typing indicator
+    typingTimer = null;
+    handleTyping() {
+        // Clear existing timer
+        clearTimeout(this.typingTimer);
+
+        // In real implementation, emit typing event via WebRTC
+        console.log('User is typing...');
+
+        // Stop typing after 1 second
+        this.typingTimer = setTimeout(() => {
+            console.log('User stopped typing');
+        }, 1000);
     }
 
     async sendMessage() {
@@ -448,6 +564,83 @@ style.textContent = `
         to {
             opacity: 0;
         }
+    }
+
+    .typing-dots {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 0;
+    }
+
+    .typing-dots span {
+        width: 8px;
+        height: 8px;
+        background: var(--text-secondary);
+        border-radius: 50%;
+        animation: typingBounce 1.4s ease-in-out infinite;
+    }
+
+    .typing-dots span:nth-child(1) {
+        animation-delay: -0.32s;
+    }
+
+    .typing-dots span:nth-child(2) {
+        animation-delay: -0.16s;
+    }
+
+    @keyframes typingBounce {
+        0%, 80%, 100% {
+            transform: scale(0.8);
+            opacity: 0.5;
+        }
+        40% {
+            transform: scale(1);
+            opacity: 1;
+        }
+    }
+
+    .emoji-button {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+    }
+
+    .emoji-button:hover {
+        background: var(--liquid-glass);
+    }
+
+    .file-preview {
+        max-width: 200px;
+        max-height: 200px;
+        border-radius: 12px;
+        margin: 8px 0;
+    }
+
+    .voice-wave {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        height: 40px;
+    }
+
+    .voice-wave span {
+        width: 3px;
+        background: var(--system-blue);
+        border-radius: 3px;
+        animation: wave 1s ease-in-out infinite;
+    }
+
+    @keyframes wave {
+        0%, 100% { height: 10px; }
+        50% { height: 30px; }
     }
 `;
 document.head.appendChild(style);
