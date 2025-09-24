@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Draw - 실시간 지도 그리기</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            overflow: hidden;
+        }
+
+        #map {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Control Panel */
+        .control-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            min-width: 250px;
+        }
+
+        .control-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tool-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .tool-btn {
+            width: 100%;
+            height: 45px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            transition: all 0.2s ease;
+        }
+
+        .tool-btn:hover {
+            background: #f5f5f5;
+            transform: scale(1.05);
+        }
+
+        .tool-btn.active {
+            background: #007AFF;
+            border-color: #007AFF;
+            color: white;
+            box-shadow: 0 2px 10px rgba(0, 122, 255, 0.3);
+        }
+
+        .color-section {
+            margin-bottom: 15px;
+        }
+
+        .color-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 6px;
+        }
+
+        .color-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .color-btn:hover {
+            transform: scale(1.15);
+        }
+
+        .color-btn.active {
+            border-color: #333;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .stroke-controls {
+            margin-bottom: 15px;
+        }
+
+        .slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #e0e0e0;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #007AFF;
+            cursor: pointer;
+        }
+
+        .slider-value {
+            display: inline-block;
+            margin-left: 10px;
+            font-weight: 600;
+            color: #007AFF;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .action-btn {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .action-btn:hover {
+            background: #f5f5f5;
+        }
+
+        .action-btn.danger {
+            color: #FF3B30;
+            border-color: #FF3B30;
+        }
+
+        .action-btn.danger:hover {
+            background: #FF3B30;
+            color: white;
+        }
+
+        /* Stats Panel */
+        .stats-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 15px 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            display: flex;
+            gap: 20px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #007AFF;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+        }
+
+        /* User List */
+        .user-panel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            max-height: 200px;
+            min-width: 200px;
+            overflow-y: auto;
+        }
+
+        .user-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+
+        .user-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #34C759;
+        }
+
+        /* Drawing Cursor */
+        .drawing-cursor {
+            position: fixed;
+            pointer-events: none;
+            border-radius: 50%;
+            border: 2px solid currentColor;
+            z-index: 10000;
+            display: none;
+        }
+
+        /* Export Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .modal-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .export-options {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .export-btn {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #007AFF;
+            border-radius: 8px;
+            background: white;
+            color: #007AFF;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .export-btn:hover {
+            background: #007AFF;
+            color: white;
+        }
+
+        /* Layer Toggle */
+        .layer-toggle {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+        }
+
+        .layer-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+        }
+
+        .layer-checkbox {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Notification */
+        .notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 12px;
+            font-size: 16px;
+            z-index: 3000;
+            display: none;
+        }
+
+        .notification.show {
+            display: block;
+            animation: fadeInOut 2s ease;
+        }
+
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; }
+            20%, 80% { opacity: 1; }
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .control-panel {
+                left: 10px;
+                top: 10px;
+                padding: 15px;
+                min-width: 200px;
+            }
+
+            .stats-panel {
+                top: auto;
+                bottom: 10px;
+                left: 10px;
+                right: auto;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .user-panel {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Map Container -->
+    <div id="map"></div>
+
+    <!-- Drawing Cursor -->
+    <div class="drawing-cursor" id="drawingCursor"></div>
+
+    <!-- Control Panel -->
+    <div class="control-panel">
+        <div class="control-title">
+            🎨 그리기 도구
+        </div>
+
+        <div class="tool-buttons">
+            <button class="tool-btn active" data-tool="pen" title="펜">✏️</button>
+            <button class="tool-btn" data-tool="line" title="직선">📏</button>
+            <button class="tool-btn" data-tool="polygon" title="다각형">⬟</button>
+            <button class="tool-btn" data-tool="circle" title="원">⭕</button>
+            <button class="tool-btn" data-tool="rectangle" title="사각형">⬜</button>
+            <button class="tool-btn" data-tool="marker" title="마커">📍</button>
+            <button class="tool-btn" data-tool="text" title="텍스트">💬</button>
+            <button class="tool-btn" data-tool="eraser" title="지우개">🧹</button>
+            <button class="tool-btn" data-tool="move" title="이동">✋</button>
+        </div>
+
+        <div class="color-section">
+            <div class="color-label">색상</div>
+            <div class="color-palette" id="colorPalette"></div>
+        </div>
+
+        <div class="stroke-controls">
+            <div class="color-label">선 굵기 <span class="slider-value" id="strokeValue">3</span>px</div>
+            <input type="range" class="slider" id="strokeSlider" min="1" max="20" value="3">
+        </div>
+
+        <div class="stroke-controls">
+            <div class="color-label">투명도 <span class="slider-value" id="opacityValue">100</span>%</div>
+            <input type="range" class="slider" id="opacitySlider" min="10" max="100" value="100">
+        </div>
+
+        <div class="action-buttons">
+            <button class="action-btn" onclick="undo()">↶ 실행취소</button>
+            <button class="action-btn" onclick="redo()">↷ 다시실행</button>
+        </div>
+
+        <div class="action-buttons" style="margin-top: 10px;">
+            <button class="action-btn" onclick="exportDrawing()">💾 내보내기</button>
+            <button class="action-btn danger" onclick="clearAll()">🗑️ 전체삭제</button>
+        </div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div class="stats-panel">
+        <div class="stat-item">
+            <div class="stat-value" id="drawingCount">0</div>
+            <div class="stat-label">그림 수</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="userCount">0</div>
+            <div class="stat-label">참여자</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="myDrawings">0</div>
+            <div class="stat-label">내 그림</div>
+        </div>
+    </div>
+
+    <!-- User Panel -->
+    <div class="user-panel">
+        <div class="user-title">🌐 온라인 사용자</div>
+        <div id="userList"></div>
+    </div>
+
+    <!-- Layer Toggle -->
+    <div class="layer-toggle">
+        <div class="user-title">📑 레이어</div>
+        <div class="layer-item">
+            <input type="checkbox" class="layer-checkbox" id="myDrawingsLayer" checked>
+            <label for="myDrawingsLayer">내 그림</label>
+        </div>
+        <div class="layer-item">
+            <input type="checkbox" class="layer-checkbox" id="othersDrawingsLayer" checked>
+            <label for="othersDrawingsLayer">다른 사람 그림</label>
+        </div>
+        <div class="layer-item">
+            <input type="checkbox" class="layer-checkbox" id="satelliteLayer">
+            <label for="satelliteLayer">위성 지도</label>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal" id="exportModal">
+        <div class="modal-content">
+            <div class="modal-title">🎨 그림 내보내기</div>
+            <p>지도에 그린 모든 그림을 내보냅니다.</p>
+            <div class="export-options">
+                <button class="export-btn" onclick="exportAs('geojson')">GeoJSON</button>
+                <button class="export-btn" onclick="exportAs('image')">이미지</button>
+                <button class="export-btn" onclick="exportAs('svg')">SVG</button>
+            </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <button class="action-btn" onclick="closeExport()">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div class="notification" id="notification"></div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="map-draw.js"></script>
+</body>
+</html>
