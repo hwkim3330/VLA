@@ -1,648 +1,463 @@
-// Zero Messenger - Pure JavaScript P2P Implementation
-// No external dependencies required
+// NEXM Super - Client-Side Application
+const socket = io();
 
-class ZeroMessenger {
-    constructor() {
-        this.currentUser = null;
-        this.peers = new Map();
-        this.messages = new Map();
-        this.activeChat = null;
-        this.connection = null;
-        this.keyPair = null;
+// User state
+let currentUser = null;
+let balance = 0;
+let isNode = false;
+let isMining = false;
+let messages = [];
+let transactions = [];
+let activeTab = 'chat';
+let selectedRecipient = 'all';
 
-        // Initialize WebRTC configuration
-        this.rtcConfig = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        };
+// Canvas state
+const pixelCanvas = document.getElementById('pixelCanvas');
+const ctx = pixelCanvas ? pixelCanvas.getContext('2d') : null;
+const canvasSize = { width: 200, height: 200 };
+const pixelSize = 3;
+let selectedColor = '#FF0000';
+let canDrawPixel = true;
+let pixelData = new Map();
 
-        this.initializeApp();
+// Initialize application
+document.addEventListener('DOMContentLoaded', () => {
+    setupUI();
+    setupCanvas();
+    initializeApp();
+});
+
+function setupUI() {
+    // Tab navigation
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            switchTab(btn.dataset.tab);
+        });
+    });
+
+    // Color palette
+    document.querySelectorAll('.color-option').forEach(option => {
+        option.addEventListener('click', () => {
+            selectedColor = option.dataset.color;
+            document.querySelectorAll('.color-option').forEach(o => o.classList.remove('selected'));
+            option.classList.add('selected');
+        });
+    });
+
+    // Message input
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    if (messageInput && sendBtn) {
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
     }
 
-    async initializeApp() {
-        // Generate encryption keys using WebCrypto API
-        this.keyPair = await this.generateKeyPair();
-
-        // Check for existing session
-        const savedSession = localStorage.getItem('zeroSession');
-        if (savedSession) {
-            const session = JSON.parse(savedSession);
-            this.currentUser = session.user;
-            this.showChatScreen();
-        }
+    // Token transfer
+    const transferBtn = document.getElementById('transferBtn');
+    if (transferBtn) {
+        transferBtn.addEventListener('click', transferTokens);
     }
 
-    async generateKeyPair() {
-        return await crypto.subtle.generateKey(
-            {
-                name: 'RSA-OAEP',
-                modulusLength: 2048,
-                publicExponent: new Uint8Array([1, 0, 1]),
-                hash: 'SHA-256',
-            },
-            true,
-            ['encrypt', 'decrypt']
-        );
+    // Node toggle
+    const nodeToggle = document.getElementById('nodeToggle');
+    if (nodeToggle) {
+        nodeToggle.addEventListener('change', toggleNode);
     }
 
-    async login() {
-        const countryCode = document.getElementById('countryCode').value;
-        const phoneNumber = document.getElementById('phoneNumber').value;
+    // Leaderboard refresh
+    const refreshLeaderboard = document.getElementById('refreshLeaderboard');
+    if (refreshLeaderboard) {
+        refreshLeaderboard.addEventListener('click', () => {
+            socket.emit('getLeaderboard');
+        });
+    }
+}
 
-        if (!phoneNumber) {
-            this.showNotification('전화번호 또는 이메일을 입력하세요', 'error');
+function setupCanvas() {
+    if (!pixelCanvas) return;
+
+    pixelCanvas.width = canvasSize.width * pixelSize;
+    pixelCanvas.height = canvasSize.height * pixelSize;
+
+    // Draw grid
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= canvasSize.width; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * pixelSize, 0);
+        ctx.lineTo(i * pixelSize, pixelCanvas.height);
+        ctx.stroke();
+    }
+    for (let i = 0; i <= canvasSize.height; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, i * pixelSize);
+        ctx.lineTo(pixelCanvas.width, i * pixelSize);
+        ctx.stroke();
+    }
+
+    // Canvas click handler
+    pixelCanvas.addEventListener('click', (e) => {
+        if (!canDrawPixel || balance < 0.5) {
+            showNotification('Insufficient tokens or cooldown active', 'error');
             return;
         }
 
-        // Create user identifier
-        const identifier = phoneNumber.includes('@') ? phoneNumber : `${countryCode}${phoneNumber.replace(/[^0-9]/g, '')}`;
+        const rect = pixelCanvas.getBoundingClientRect();
+        const x = Math.floor((e.clientX - rect.left) / pixelSize);
+        const y = Math.floor((e.clientY - rect.top) / pixelSize);
 
-        // Generate user ID from identifier
-        const encoder = new TextEncoder();
-        const data = encoder.encode(identifier);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const userId = hashArray.slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
-
-        this.currentUser = {
-            id: userId,
-            identifier: identifier,
-            displayName: phoneNumber,
-            publicKey: await this.exportPublicKey(this.keyPair.publicKey)
-        };
-
-        // Save session
-        localStorage.setItem('zeroSession', JSON.stringify({
-            user: this.currentUser,
-            timestamp: Date.now()
-        }));
-
-        // Initialize peer connection
-        await this.initializePeerConnection();
-
-        this.showChatScreen();
-        this.loadMockChats(); // For demo purposes
-    }
-
-    async exportPublicKey(publicKey) {
-        const exported = await crypto.subtle.exportKey('spki', publicKey);
-        return btoa(String.fromCharCode(...new Uint8Array(exported)));
-    }
-
-    showChatScreen() {
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('chatScreen').classList.add('active');
-    }
-
-    async initializePeerConnection() {
-        // In a real implementation, this would connect to a signaling server
-        // For now, we'll use a simple WebSocket or polling mechanism
-
-        // Try to connect to local server if available
-        try {
-            const response = await fetch('/api/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    identifier: this.currentUser.identifier,
-                    publicKey: this.currentUser.publicKey
-                })
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                console.log('Registered with server:', data);
-            }
-        } catch (error) {
-            console.log('Running in standalone mode');
-            // Continue in standalone mode
+        if (x >= 0 && x < canvasSize.width && y >= 0 && y < canvasSize.height) {
+            placePixel(x, y);
         }
-    }
+    });
+}
 
-    loadMockChats() {
-        // Demo chat data
-        const mockChats = [
-            {
-                id: 'chat1',
-                name: '김철수',
-                avatar: '김',
-                lastMessage: '안녕하세요! 새로운 메신저 어떤가요?',
-                time: '오후 2:30',
-                unread: 2
-            },
-            {
-                id: 'chat2',
-                name: '이영희',
-                avatar: '이',
-                lastMessage: '프로젝트 진행상황 공유 부탁드립니다',
-                time: '오후 1:15',
-                unread: 0
-            },
-            {
-                id: 'chat3',
-                name: '박민수',
-                avatar: '박',
-                lastMessage: '내일 회의 시간 확인 부탁해요',
-                time: '오전 11:45',
-                unread: 1
-            },
-            {
-                id: 'chat4',
-                name: '개발팀',
-                avatar: '개',
-                lastMessage: '최신 빌드 배포 완료했습니다',
-                time: '어제',
-                unread: 5
-            }
-        ];
+function initializeApp() {
+    const storedUser = localStorage.getItem('nexmUser');
 
-        const chatList = document.getElementById('chatList');
-        chatList.innerHTML = '';
-
-        mockChats.forEach(chat => {
-            const chatItem = document.createElement('div');
-            chatItem.className = 'chat-item';
-            chatItem.dataset.chatId = chat.id;
-            chatItem.onclick = () => this.selectChat(chat);
-
-            chatItem.innerHTML = `
-                <div class="chat-avatar">${chat.avatar}</div>
-                <div class="chat-info">
-                    <div class="chat-name">${chat.name}</div>
-                    <div class="chat-preview">${chat.lastMessage}</div>
-                </div>
-                <div class="chat-meta">
-                    <div class="chat-time">${chat.time}</div>
-                    ${chat.unread > 0 ? `<div class="unread-badge">${chat.unread}</div>` : ''}
-                </div>
-            `;
-
-            chatList.appendChild(chatItem);
-        });
-    }
-
-    selectChat(chat) {
-        this.activeChat = chat;
-
-        // Update active state
-        document.querySelectorAll('.chat-item').forEach(item => {
-            item.classList.toggle('active', item.dataset.chatId === chat.id);
-        });
-
-        // Load messages
-        this.loadMessages(chat);
-    }
-
-    loadMessages(chat) {
-        const messagesContainer = document.getElementById('messagesContainer');
-
-        messagesContainer.innerHTML = `
-            <div class="messages-header">
-                <div class="recipient-info">
-                    <div class="recipient-avatar">${chat.avatar}</div>
-                    <div class="recipient-details">
-                        <div class="recipient-name">${chat.name}</div>
-                        <div class="recipient-status">온라인</div>
-                    </div>
-                </div>
-                <div class="nav-actions">
-                    <button class="icon-button" onclick="app.showChatInfo()">
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
-                            <path d="M10 4a2 2 0 100-4 2 2 0 000 4z"/>
-                            <path d="M10 20a2 2 0 100-4 2 2 0 000 4z"/>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-
-            <div class="messages-list" id="messagesList">
-                <!-- Messages will be loaded here -->
-            </div>
-
-            <div class="message-input-container">
-                <input type="file" id="fileInput" style="display:none" onchange="app.handleFileSelect(event)" accept="image/*,video/*,.pdf,.doc,.docx">
-                <button class="emoji-button" onclick="app.toggleEmojiPicker()" title="이모지">😊</button>
-                <button class="emoji-button" onclick="document.getElementById('fileInput').click()" title="파일 첨부">📎</button>
-                <div class="message-input-wrapper" style="flex:1">
-                    <textarea class="message-input" id="messageInput"
-                        placeholder="메시지를 입력하세요..."
-                        rows="1"
-                        onkeypress="app.handleKeyPress(event)"
-                        oninput="app.handleTyping()"></textarea>
-                </div>
-                <button class="emoji-button" onclick="app.startVoiceMessage()" title="음성 메시지">🎤</button>
-                <button class="send-button" onclick="app.sendMessage()">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M3 12L21 3L12 21L10 14L3 12Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-            </div>
-        `;
-
-        // Load mock messages
-        this.loadMockMessages(chat.id);
-    }
-
-    loadMockMessages(chatId) {
-        const messages = [
-            { text: '안녕하세요!', sent: false, time: '오후 2:25' },
-            { text: '새로운 메신저 테스트 중이신가요?', sent: false, time: '오후 2:28' },
-            { text: '네, 맞아요! 어떤가요?', sent: true, time: '오후 2:29' },
-            { text: '디자인이 정말 깔끔하네요', sent: false, time: '오후 2:30' },
-            { text: '애플 스타일로 만들어봤어요', sent: true, time: '오후 2:30' }
-        ];
-
-        const messagesList = document.getElementById('messagesList');
-        messagesList.innerHTML = '';
-
-        messages.forEach(msg => {
-            this.displayMessage(msg);
-        });
-
-        messagesList.scrollTop = messagesList.scrollHeight;
-    }
-
-    displayMessage(msg) {
-        const messagesList = document.getElementById('messagesList');
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${msg.sent ? 'sent' : 'received'}`;
-
-        messageDiv.innerHTML = `
-            <div class="message-bubble">
-                <div class="message-text">${msg.text}</div>
-                <div class="message-time">${msg.time}</div>
-            </div>
-        `;
-
-        messagesList.appendChild(messageDiv);
-    }
-
-    // Show typing indicator
-    showTypingIndicator() {
-        if (document.getElementById('typingIndicator')) return;
-
-        const messagesList = document.getElementById('messagesList');
-        const typingDiv = document.createElement('div');
-        typingDiv.id = 'typingIndicator';
-        typingDiv.className = 'message received';
-        typingDiv.innerHTML = `
-            <div class="message-bubble">
-                <div class="typing-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-            </div>
-        `;
-        messagesList.appendChild(typingDiv);
-        messagesList.scrollTop = messagesList.scrollHeight;
-    }
-
-    hideTypingIndicator() {
-        const indicator = document.getElementById('typingIndicator');
-        if (indicator) indicator.remove();
-    }
-
-    // Handle file selection
-    async handleFileSelect(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        // Convert to base64 for demo
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const message = {
-                text: `📎 ${file.name}`,
-                file: {
-                    name: file.name,
-                    type: file.type,
-                    size: file.size,
-                    data: e.target.result
-                },
-                sent: true,
-                time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-            };
-
-            this.displayFileMessage(message);
-        };
-        reader.readAsDataURL(file);
-    }
-
-    displayFileMessage(msg) {
-        const messagesList = document.getElementById('messagesList');
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${msg.sent ? 'sent' : 'received'}`;
-
-        let fileContent = '';
-        if (msg.file.type.startsWith('image/')) {
-            fileContent = `<img src="${msg.file.data}" class="file-preview" alt="${msg.file.name}">`;
-        } else if (msg.file.type.startsWith('video/')) {
-            fileContent = `<video src="${msg.file.data}" class="file-preview" controls></video>`;
-        }
-
-        messageDiv.innerHTML = `
-            <div class="message-bubble">
-                ${fileContent}
-                <div class="message-text">${msg.text}</div>
-                <div class="message-time">${msg.time}</div>
-            </div>
-        `;
-
-        messagesList.appendChild(messageDiv);
-        messagesList.scrollTop = messagesList.scrollHeight;
-    }
-
-    // Toggle emoji picker
-    toggleEmojiPicker() {
-        const emojis = ['😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶'];
-
-        const picker = prompt('이모지를 선택하세요:\n' + emojis.join(' '));
-        if (picker) {
-            const input = document.getElementById('messageInput');
-            input.value += picker;
-            input.focus();
-        }
-    }
-
-    // Start voice message recording
-    startVoiceMessage() {
-        alert('음성 메시지 기능은 준비 중입니다 🎤');
-
-        // In real implementation:
-        // navigator.mediaDevices.getUserMedia({ audio: true })
-        // Record audio and send as blob
-    }
-
-    // Handle typing indicator
-    typingTimer = null;
-    handleTyping() {
-        // Clear existing timer
-        clearTimeout(this.typingTimer);
-
-        // In real implementation, emit typing event via WebRTC
-        console.log('User is typing...');
-
-        // Stop typing after 1 second
-        this.typingTimer = setTimeout(() => {
-            console.log('User stopped typing');
-        }, 1000);
-    }
-
-    async sendMessage() {
-        const input = document.getElementById('messageInput');
-        const text = input.value.trim();
-
-        if (!text || !this.activeChat) return;
-
-        // Create message
-        const message = {
-            text: text,
-            sent: true,
-            time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-        };
-
-        // Display message immediately
-        this.displayMessage(message);
-
-        // Clear input
-        input.value = '';
-        input.style.height = 'auto';
-
-        // Scroll to bottom
-        const messagesList = document.getElementById('messagesList');
-        messagesList.scrollTop = messagesList.scrollHeight;
-
-        // In real implementation, encrypt and send via WebRTC
-        await this.sendEncryptedMessage(this.activeChat.id, text);
-    }
-
-    async sendEncryptedMessage(recipientId, text) {
-        // This would normally:
-        // 1. Encrypt the message with recipient's public key
-        // 2. Send via WebRTC data channel
-        // 3. Fall back to server relay if direct connection fails
-
-        console.log('Sending encrypted message to:', recipientId);
-
-        // Simulate network delay
-        setTimeout(() => {
-            // Simulate received reply
-            const reply = {
-                text: '메시지 잘 받았습니다!',
-                sent: false,
-                time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-            };
-            this.displayMessage(reply);
-
-            const messagesList = document.getElementById('messagesList');
-            messagesList.scrollTop = messagesList.scrollHeight;
-        }, 1000);
-    }
-
-    handleKeyPress(event) {
-        if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            this.sendMessage();
-        }
-    }
-
-    startNewChat() {
-        const phoneNumber = prompt('대화할 상대방의 전화번호를 입력하세요:');
-        if (!phoneNumber) return;
-
-        const newChat = {
-            id: 'chat_' + Date.now(),
-            name: phoneNumber,
-            avatar: phoneNumber[0],
-            lastMessage: '',
-            time: '지금',
-            unread: 0
-        };
-
-        // Add to chat list
-        const chatList = document.getElementById('chatList');
-        const chatItem = document.createElement('div');
-        chatItem.className = 'chat-item';
-        chatItem.dataset.chatId = newChat.id;
-        chatItem.onclick = () => this.selectChat(newChat);
-
-        chatItem.innerHTML = `
-            <div class="chat-avatar">${newChat.avatar}</div>
-            <div class="chat-info">
-                <div class="chat-name">${newChat.name}</div>
-                <div class="chat-preview">새 대화를 시작하세요</div>
-            </div>
-            <div class="chat-meta">
-                <div class="chat-time">${newChat.time}</div>
-            </div>
-        `;
-
-        chatList.insertBefore(chatItem, chatList.firstChild);
-        this.selectChat(newChat);
-    }
-
-    showSettings() {
-        alert('설정 기능은 준비 중입니다');
-    }
-
-    showChatInfo() {
-        alert(`${this.activeChat.name}의 정보\n\n종단간 암호화 활성화됨\n메시지는 P2P로 전송됩니다`);
-    }
-
-    showNotification(message, type = 'info') {
-        // Create notification element
-        const notification = document.createElement('div');
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${type === 'error' ? 'var(--system-red)' : 'var(--system-blue)'};
-            color: white;
-            padding: 12px 24px;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-            z-index: 10000;
-            animation: slideDown 0.3s ease;
-        `;
-        notification.textContent = message;
-
-        document.body.appendChild(notification);
-
-        setTimeout(() => {
-            notification.style.animation = 'fadeOut 0.3s ease';
-            setTimeout(() => notification.remove(), 300);
-        }, 3000);
+    if (storedUser) {
+        const userData = JSON.parse(storedUser);
+        registerUser(userData);
+    } else {
+        showRegistrationModal();
     }
 }
 
-// Initialize app
-const app = new ZeroMessenger();
+function showRegistrationModal() {
+    const modal = document.createElement('div');
+    modal.className = 'registration-modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <h2>Join NEXM Network</h2>
+            <input type="text" id="usernameInput" placeholder="Choose username" />
+            <input type="tel" id="phoneInput" placeholder="Phone (optional)" />
+            <label class="node-option">
+                <input type="checkbox" id="isNodeInput" />
+                <span>Run as node (earn rewards)</span>
+            </label>
+            <button id="joinBtn">Join Network</button>
+        </div>
+    `;
 
-// Global functions for onclick handlers
-function login() {
-    app.login();
+    document.body.appendChild(modal);
+
+    document.getElementById('joinBtn').addEventListener('click', () => {
+        const username = document.getElementById('usernameInput').value.trim();
+        if (!username) {
+            alert('Please enter a username');
+            return;
+        }
+
+        const userData = {
+            username: username,
+            phone: document.getElementById('phoneInput').value || null,
+            isNode: document.getElementById('isNodeInput').checked,
+            publicKey: generatePublicKey()
+        };
+
+        localStorage.setItem('nexmUser', JSON.stringify(userData));
+        modal.remove();
+        registerUser(userData);
+    });
 }
 
-function startNewChat() {
-    app.startNewChat();
+function registerUser(userData) {
+    currentUser = userData;
+    socket.emit('register', userData);
 }
 
-function showSettings() {
-    app.showSettings();
+function generatePublicKey() {
+    // Simple key generation for demo
+    return btoa(Math.random().toString(36).substring(2));
 }
 
-// Auto-resize textarea
-document.addEventListener('input', function(e) {
-    if (e.target.classList.contains('message-input')) {
-        e.target.style.height = 'auto';
-        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+// Socket event handlers
+socket.on('registered', (data) => {
+    balance = data.balance;
+    updateBalanceDisplay();
+
+    if (data.canvasSize) {
+        canvasSize.width = data.canvasSize.width;
+        canvasSize.height = data.canvasSize.height;
+        setupCanvas();
+    }
+
+    socket.emit('requestPixels', {});
+    socket.emit('getLeaderboard');
+    socket.emit('getTransactions');
+
+    if (currentUser.isNode) {
+        startMining();
     }
 });
 
-// Add CSS animations
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideDown {
-        from {
-            transform: translate(-50%, -100%);
-            opacity: 0;
-        }
-        to {
-            transform: translate(-50%, 0);
-            opacity: 1;
-        }
+socket.on('stats', (stats) => {
+    updateStats(stats);
+});
+
+socket.on('userUpdate', (data) => {
+    updateUserList(data.users);
+    document.getElementById('userCount').textContent = data.count;
+});
+
+socket.on('newMessage', (message) => {
+    messages.push(message);
+    displayMessage(message);
+});
+
+socket.on('balanceUpdate', (newBalance) => {
+    balance = newBalance;
+    updateBalanceDisplay();
+});
+
+socket.on('pixels', (pixels) => {
+    pixels.forEach(pixel => {
+        drawPixel(pixel.x, pixel.y, pixel.color);
+        pixelData.set(`${pixel.x},${pixel.y}`, pixel.color);
+    });
+});
+
+socket.on('pixelPlaced', (data) => {
+    drawPixel(data.x, data.y, data.color);
+    pixelData.set(`${data.x},${data.y}`, data.color);
+
+    if (data.user === currentUser.username) {
+        canDrawPixel = false;
+        setTimeout(() => {
+            canDrawPixel = true;
+            showNotification('You can draw again!', 'success');
+        }, 5000);
+    }
+});
+
+socket.on('transferSuccess', (transaction) => {
+    showNotification(`Transfer successful: ${transaction.amount} NEXM sent`, 'success');
+    socket.emit('getTransactions');
+});
+
+socket.on('transferError', (error) => {
+    showNotification(`Transfer failed: ${error.error}`, 'error');
+});
+
+socket.on('tokenReceived', (data) => {
+    showNotification(`Received ${data.amount} NEXM from ${data.from}`, 'success');
+    socket.emit('getTransactions');
+});
+
+socket.on('miningReward', (data) => {
+    showNotification(`Mining reward: +${data.amount} NEXM`, 'success');
+    balance = data.balance;
+    updateBalanceDisplay();
+});
+
+socket.on('transactions', (txList) => {
+    transactions = txList;
+    displayTransactions();
+});
+
+socket.on('leaderboard', (leaders) => {
+    displayLeaderboard(leaders);
+});
+
+socket.on('pixelError', (error) => {
+    showNotification(error.error, 'error');
+});
+
+// UI functions
+function switchTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.toggle('active', content.id === `${tab}Tab`);
+    });
+}
+
+function sendMessage() {
+    const input = document.getElementById('messageInput');
+    const content = input.value.trim();
+
+    if (!content) return;
+
+    socket.emit('sendMessage', {
+        to: selectedRecipient,
+        content: content,
+        encrypted: false
+    });
+
+    input.value = '';
+}
+
+function displayMessage(message) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+
+    const messageEl = document.createElement('div');
+    messageEl.className = `message ${message.from === currentUser.username ? 'sent' : 'received'}`;
+    messageEl.innerHTML = `
+        <div class="message-header">
+            <span class="sender">${message.from}</span>
+            <span class="time">${new Date(message.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="message-content">${message.content}</div>
+    `;
+
+    messagesContainer.appendChild(messageEl);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function placePixel(x, y) {
+    socket.emit('placePixel', {
+        x: x,
+        y: y,
+        color: selectedColor
+    });
+}
+
+function drawPixel(x, y, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x * pixelSize, y * pixelSize, pixelSize, pixelSize);
+}
+
+function transferTokens() {
+    const recipient = document.getElementById('transferRecipient').value.trim();
+    const amount = parseFloat(document.getElementById('transferAmount').value);
+
+    if (!recipient || !amount || amount <= 0) {
+        showNotification('Invalid transfer details', 'error');
+        return;
     }
 
-    @keyframes fadeOut {
-        from {
-            opacity: 1;
-        }
-        to {
-            opacity: 0;
-        }
-    }
+    socket.emit('transfer', {
+        to: recipient,
+        amount: amount
+    });
+}
 
-    .typing-dots {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 4px 0;
-    }
+function toggleNode(e) {
+    isNode = e.target.checked;
 
-    .typing-dots span {
-        width: 8px;
-        height: 8px;
-        background: var(--text-secondary);
-        border-radius: 50%;
-        animation: typingBounce 1.4s ease-in-out infinite;
+    if (isNode && !isMining) {
+        startMining();
+    } else if (!isNode && isMining) {
+        stopMining();
     }
+}
 
-    .typing-dots span:nth-child(1) {
-        animation-delay: -0.32s;
+function startMining() {
+    if (isMining) return;
+
+    isMining = true;
+    socket.emit('startMining');
+    document.getElementById('miningStatus').textContent = 'Mining...';
+    showNotification('Started mining NEXM tokens', 'success');
+}
+
+function stopMining() {
+    isMining = false;
+    document.getElementById('miningStatus').textContent = 'Inactive';
+}
+
+function updateBalanceDisplay() {
+    const balanceElements = document.querySelectorAll('.balance-display');
+    balanceElements.forEach(el => {
+        el.textContent = `${balance.toFixed(2)} NEXM`;
+    });
+}
+
+function updateStats(stats) {
+    document.getElementById('totalUsers').textContent = stats.users;
+    document.getElementById('totalPixels').textContent = stats.totalPixels;
+    document.getElementById('totalTransactions').textContent = stats.totalTransactions;
+    document.getElementById('activeNodes').textContent = stats.activeNodes;
+}
+
+function updateUserList(users) {
+    const userList = document.getElementById('userList');
+    if (!userList) return;
+
+    userList.innerHTML = users.map(user => `
+        <div class="user-item ${user.isNode ? 'node' : ''}">
+            <span>${user.username} ${user.isNode ? '⛏️' : ''}</span>
+            <span>${user.balance.toFixed(2)} NEXM</span>
+        </div>
+    `).join('');
+}
+
+function displayTransactions() {
+    const txContainer = document.getElementById('transactionHistory');
+    if (!txContainer) return;
+
+    txContainer.innerHTML = transactions.slice(-20).reverse().map(tx => `
+        <div class="transaction">
+            <div class="tx-type">${tx.type}</div>
+            <div class="tx-details">
+                ${tx.type === 'transfer' ? `${tx.from} → ${tx.to}` : tx.reason || ''}
+            </div>
+            <div class="tx-amount">${tx.type === 'deduction' ? '-' : '+'}${tx.amount} NEXM</div>
+            <div class="tx-time">${new Date(tx.timestamp).toLocaleString()}</div>
+        </div>
+    `).join('');
+}
+
+function displayLeaderboard(leaders) {
+    const leaderboard = document.getElementById('leaderboard');
+    if (!leaderboard) return;
+
+    leaderboard.innerHTML = leaders.map((user, index) => `
+        <div class="leader-item">
+            <span class="rank">#${index + 1}</span>
+            <span class="username">${user.username} ${user.isNode ? '⛏️' : ''}</span>
+            <span class="balance">${user.balance.toFixed(2)} NEXM</span>
+        </div>
+    `).join('');
+}
+
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        notification.classList.add('show');
+    }, 10);
+
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+// Export canvas as image
+function exportCanvas() {
+    const link = document.createElement('a');
+    link.download = `nexm-canvas-${Date.now()}.png`;
+    link.href = pixelCanvas.toDataURL();
+    link.click();
+}
+
+// Add export button handler
+document.getElementById('exportCanvas')?.addEventListener('click', exportCanvas);
+
+// Handle window resize
+window.addEventListener('resize', () => {
+    if (ctx) setupCanvas();
+});
+
+// Periodic updates
+setInterval(() => {
+    if (socket.connected) {
+        socket.emit('getLeaderboard');
     }
+}, 30000);
 
-    .typing-dots span:nth-child(2) {
-        animation-delay: -0.16s;
-    }
-
-    @keyframes typingBounce {
-        0%, 80%, 100% {
-            transform: scale(0.8);
-            opacity: 0.5;
-        }
-        40% {
-            transform: scale(1);
-            opacity: 1;
-        }
-    }
-
-    .emoji-button {
-        width: 35px;
-        height: 35px;
-        border-radius: 50%;
-        background: transparent;
-        border: none;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 20px;
-    }
-
-    .emoji-button:hover {
-        background: var(--liquid-glass);
-    }
-
-    .file-preview {
-        max-width: 200px;
-        max-height: 200px;
-        border-radius: 12px;
-        margin: 8px 0;
-    }
-
-    .voice-wave {
-        display: flex;
-        align-items: center;
-        gap: 2px;
-        height: 40px;
-    }
-
-    .voice-wave span {
-        width: 3px;
-        background: var(--system-blue);
-        border-radius: 3px;
-        animation: wave 1s ease-in-out infinite;
-    }
-
-    @keyframes wave {
-        0%, 100% { height: 10px; }
-        50% { height: 30px; }
-    }
-`;
-document.head.appendChild(style);
-
-console.log('Zero Messenger initialized - No external dependencies required!');
+console.log('🚀 NEXM Super Client initialized');
