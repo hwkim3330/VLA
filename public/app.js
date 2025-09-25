@@ -5,6 +5,7 @@ const socket = io();
 let currentUser = null;
 let balance = 0;
 let isNode = false;
+let isAdmin = false;
 let isMining = false;
 let messages = [];
 let transactions = [];
@@ -104,7 +105,8 @@ function setupCanvas() {
 
     // Canvas click handler
     pixelCanvas.addEventListener('click', (e) => {
-        if (!canDrawPixel || balance < 0.5) {
+        // Admins have no restrictions
+        if (!isAdmin && (!canDrawPixel || balance < 0.5)) {
             showNotification('Insufficient tokens or cooldown active', 'error');
             return;
         }
@@ -138,6 +140,7 @@ function showRegistrationModal() {
             <h2>Join NEXM Network</h2>
             <input type="text" id="usernameInput" placeholder="Choose username" />
             <input type="tel" id="phoneInput" placeholder="Phone (optional)" />
+            <input type="password" id="adminPasswordInput" placeholder="Admin password (optional)" />
             <label class="node-option">
                 <input type="checkbox" id="isNodeInput" />
                 <span>Run as node (earn rewards)</span>
@@ -155,10 +158,13 @@ function showRegistrationModal() {
             return;
         }
 
+        const adminPassword = document.getElementById('adminPasswordInput').value;
+
         const userData = {
             username: username,
             phone: document.getElementById('phoneInput').value || null,
             isNode: document.getElementById('isNodeInput').checked,
+            adminPassword: adminPassword || null,
             publicKey: generatePublicKey()
         };
 
@@ -181,7 +187,13 @@ function generatePublicKey() {
 // Socket event handlers
 socket.on('registered', (data) => {
     balance = data.balance;
+    isAdmin = data.isAdmin || false;
     updateBalanceDisplay();
+
+    // Show admin status if applicable
+    if (isAdmin) {
+        showNotification('Admin privileges activated - Unlimited drawing!', 'success');
+    }
 
     if (data.canvasSize) {
         canvasSize.width = data.canvasSize.width;
@@ -228,7 +240,8 @@ socket.on('pixelPlaced', (data) => {
     drawPixel(data.x, data.y, data.color);
     pixelData.set(`${data.x},${data.y}`, data.color);
 
-    if (data.user === currentUser.username) {
+    // Admins have no cooldown
+    if (data.user === currentUser.username && !isAdmin) {
         canDrawPixel = false;
         setTimeout(() => {
             canDrawPixel = true;
@@ -369,7 +382,11 @@ function stopMining() {
 function updateBalanceDisplay() {
     const balanceElements = document.querySelectorAll('.balance-display');
     balanceElements.forEach(el => {
-        el.textContent = `${balance.toFixed(2)} NEXM`;
+        if (isAdmin) {
+            el.textContent = `∞ NEXM (Admin)`;
+        } else {
+            el.textContent = `${balance.toFixed(2)} NEXM`;
+        }
     });
 }
 

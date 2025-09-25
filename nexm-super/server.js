@@ -248,8 +248,12 @@ const tokenEconomy = new TokenEconomy();
 const pixelCanvas = new PixelCanvas();
 const nodeManager = new NodeManager();
 
+// Admin credentials (hardcoded for simplicity)
+const ADMIN_PASSWORD = 'kim3330admin'; // Change this to your secure password
+
 // Connected users
 const users = new Map();
+const adminUsers = new Set(); // Track admin users
 const messages = [];
 
 // Socket.io handlers
@@ -264,13 +268,23 @@ io.on('connection', (socket) => {
             phone: userData.phone || null,
             publicKey: userData.publicKey,
             isNode: userData.isNode || false,
+            isAdmin: false, // Default to false
             joinedAt: Date.now()
         };
 
+        // Check if admin login
+        if (userData.adminPassword && userData.adminPassword === ADMIN_PASSWORD) {
+            user.isAdmin = true;
+            adminUsers.add(socket.id);
+            console.log(`Admin user logged in: ${user.username}`);
+        }
+
         users.set(socket.id, user);
 
-        // Give welcome bonus
-        if (tokenEconomy.getBalance(socket.id) === 0) {
+        // Give welcome bonus (admins get unlimited tokens)
+        if (user.isAdmin) {
+            tokenEconomy.reward(socket.id, 999999, 'Admin privileges');
+        } else if (tokenEconomy.getBalance(socket.id) === 0) {
             tokenEconomy.reward(socket.id, 100, 'Welcome bonus');
         }
 
@@ -285,6 +299,7 @@ io.on('connection', (socket) => {
         socket.emit('registered', {
             userId: socket.id,
             balance: tokenEconomy.getBalance(socket.id),
+            isAdmin: user.isAdmin,
             canvasSize: { width: pixelCanvas.width, height: pixelCanvas.height }
         });
 
@@ -354,13 +369,16 @@ io.on('connection', (socket) => {
         const user = users.get(socket.id);
         if (!user) return;
 
-        // Check balance
-        const cost = tokenEconomy.pixelCost;
-        const deduction = tokenEconomy.deduct(socket.id, cost, 'Pixel placement');
+        // Admins can place pixels for free with no cooldown
+        if (!user.isAdmin) {
+            // Check balance for regular users
+            const cost = tokenEconomy.pixelCost;
+            const deduction = tokenEconomy.deduct(socket.id, cost, 'Pixel placement');
 
-        if (!deduction.success) {
-            socket.emit('pixelError', { error: 'Insufficient tokens' });
-            return;
+            if (!deduction.success) {
+                socket.emit('pixelError', { error: 'Insufficient tokens' });
+                return;
+            }
         }
 
         // Place pixel
