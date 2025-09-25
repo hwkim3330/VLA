@@ -596,12 +596,13 @@
     <!-- Login Screen -->
     <div class="login-screen" id="loginScreen">
         <div class="login-card">
-            <div class="logo">🚀</div>
+            <div class="logo">💬</div>
             <h1 class="app-title">NEXM Super</h1>
             <p class="app-subtitle">메시징 • 픽셀아트 • 토큰 경제</p>
 
             <input type="text" class="login-input" id="usernameInput" placeholder="사용자 이름">
             <input type="tel" class="login-input" id="phoneInput" placeholder="전화번호 (선택)">
+            <input type="password" class="login-input" id="adminPasswordInput" placeholder="관리자 암호 ('admin' 입력시 무제한)">
 
             <div class="node-checkbox">
                 <input type="checkbox" id="isNode">
@@ -609,6 +610,10 @@
             </div>
 
             <button class="btn" onclick="login()">시작하기</button>
+
+            <div style="margin-top: 20px; font-size: 14px; color: var(--text-secondary);">
+                💡 관리자 모드: 암호에 'admin' 입력시 무제한 픽셀 그리기
+            </div>
         </div>
     </div>
 
