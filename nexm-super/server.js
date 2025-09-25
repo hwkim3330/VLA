@@ -249,7 +249,7 @@ const pixelCanvas = new PixelCanvas();
 const nodeManager = new NodeManager();
 
 // Admin credentials (hardcoded for simplicity)
-const ADMIN_PASSWORD = 'kim3330admin'; // Change this to your secure password
+const ADMIN_PASSWORD = 'admin'; // Simple admin password
 
 // Connected users
 const users = new Map();
